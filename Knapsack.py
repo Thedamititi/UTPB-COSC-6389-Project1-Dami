@@ -16,7 +16,7 @@ stroke_width = 5
 num_generations = 1000
 pop_size = 50
 elitism_count = 2
-mutation_rate = 0.1
+mutation_rate = 0.01  # Reduced mutation rate for per-bit mutation
 
 sleep_time = 0.1
 
@@ -45,20 +45,21 @@ class Item:
         self.h = h
 
     def draw(self, canvas, active=False):
-        canvas.create_text(self.x+self.w+item_padding+stroke_width*2, self.y+self.h/2, text=f'{self.value}')
+        canvas.create_text(self.x + self.w + item_padding + stroke_width * 2, self.y + self.h / 2,
+                           text=f'{self.value}')
         if active:
             canvas.create_rectangle(self.x,
                                     self.y,
-                                    self.x+self.w,
-                                    self.y+self.h,
+                                    self.x + self.w,
+                                    self.y + self.h,
                                     fill=self.color,
                                     outline=self.color,
                                     width=stroke_width)
         else:
             canvas.create_rectangle(self.x,
                                     self.y,
-                                    self.x+self.w,
-                                    self.y+self.h,
+                                    self.x + self.w,
+                                    self.y + self.h,
                                     fill='',
                                     outline=self.color,
                                     width=stroke_width)
@@ -98,6 +99,7 @@ class UI(tk.Tk):
         def generate():
             self.generate_knapsack()
             self.draw_items()
+
         # The add_command function adds an item to a menu, as opposed to add_cascade which adds a sub-menu
         # Note that we use command=generate without the () - we're telling it which function to call,
         #   not actually calling the function as part of the add_command
@@ -108,7 +110,7 @@ class UI(tk.Tk):
         def set_target():
             target_set = []
             for x in range(int(num_items * frac_target)):
-                item = self.items_list[random.randint(0, len(self.items_list)-1)]
+                item = self.items_list[random.randint(0, len(self.items_list) - 1)]
                 while item in target_set:
                     item = self.items_list[random.randint(0, len(self.items_list) - 1)]
                 target_set.append(item)
@@ -117,11 +119,13 @@ class UI(tk.Tk):
                 total += item.value
             self.target = total
             self.draw_target()
+
         menu_K.add_command(label="Get Target", command=set_target, underline=0)
 
         def start_thread():
             thread = threading.Thread(target=self.run, args=())
             thread.start()
+
         menu_K.add_command(label="Run", command=start_thread, underline=0)
 
         # We have to call self.mainloop() in our constructor (__init__) to start the UI loop and display the window
@@ -185,7 +189,7 @@ class UI(tk.Tk):
         w = (self.width - screen_padding) / 8 - screen_padding
         h = self.height / 2 - screen_padding
         self.canvas.create_rectangle(x, y, x + w, y + h, fill='black')
-        self.canvas.create_text(x+w//2, y+h+screen_padding, text=f'{self.target}', font=('Arial', 18))
+        self.canvas.create_text(x + w // 2, y + h + screen_padding, text=f'{self.target}', font=('Arial', 18))
 
     def draw_sum(self, item_sum, target):
         x = (self.width - screen_padding) / 8 * 6
@@ -195,7 +199,9 @@ class UI(tk.Tk):
         # print(f'{item_sum} / {target} * {h} = {item_sum/target} * {h} = {item_sum/target*h}')
         h *= (item_sum / target)
         self.canvas.create_rectangle(x, y, x + w, y + h, fill='black')
-        self.canvas.create_text(x+w//2, y+h+screen_padding, text=f'{item_sum} ({"+" if item_sum>target else "-"}{abs(item_sum-target)})', font=('Arial', 18))
+        self.canvas.create_text(x + w // 2, y + h + screen_padding,
+                                text=f'{item_sum} ({"+" if item_sum > target else "-"}{abs(item_sum - target)})',
+                                font=('Arial', 18))
 
     def draw_genome(self, genome, gen_num):
         for i in range(num_items):
@@ -206,94 +212,70 @@ class UI(tk.Tk):
         y = screen_padding
         w = (self.width - screen_padding) / 8 - screen_padding
         h = self.height / 4 * 3
-        self.canvas.create_text(x + w, y + h + screen_padding*2, text=f'Generation {gen_num}', font=('Arial', 18))
+        self.canvas.create_text(x + w, y + h + screen_padding * 2, text=f'Generation {gen_num}', font=('Arial', 18))
 
     def run(self):
         global pop_size
         global num_generations
 
         def gene_sum(genome):
-            total = 0
-            for i in range(len(genome) - 1):
-                if genome[i]:
-                    total += self.items_list[i].value
-            return total
+            return sum(item.value for gene, item in zip(genome, self.items_list) if gene)
 
         def fitness(genome):
-            return abs(gene_sum(genome) - self.target)
+            total = gene_sum(genome)
+            if total <= self.target:
+                return total  # Maximize total value without exceeding target
+            else:
+                return 0  # Penalize solutions that exceed the target
 
-        def get_population(last_pop=None, fitnesses=None):
+        def select_parents_tournament(population, k):
+            parents = []
+            for _ in range(2):
+                tournament = random.sample(population, k)
+                best = max(tournament, key=fitness)
+                parents.append(best)
+            return parents[0], parents[1]
+
+        def crossover_uniform(parent1, parent2):
+            child = []
+            for i in range(len(parent1)):
+                if random.random() < 0.5:
+                    child.append(parent1[i])
+                else:
+                    child.append(parent2[i])
+            return child
+
+        def mutate(genome):
+            return [not gene if random.random() < mutation_rate else gene for gene in genome]
+
+        def get_population(last_pop=None):
             population = []
             if last_pop is None:
-                for g in range(pop_size):
-                    genome = []
-                    for bit in range(num_items):
-                        genome.append(random.random() < frac_target)
+                for _ in range(pop_size):
+                    genome = [random.random() < frac_target for _ in range(num_items)]
                     population.append(genome)
-                return population
             else:
-                # elitism
-                elites = []
-                for e in range(elitism_count):
-                    elites.append(fitnesses[e])
-                for e in last_pop:
-                    if fitness(e) in elites:
-                        population.append(e)
+                # Sort population by fitness
+                sorted_pop = sorted(last_pop, key=fitness, reverse=True)
 
-                def select_parents(min_fitness):
-                    weights = []
-                    for parent in last_pop:
-                        if fitness(parent) == 0.0:
-                            weights.append(1.0)
-                        else:
-                            weights.append(min_fitness / fitness(parent))
+                # Elitism: carry over the top 'elitism_count' individuals
+                population.extend(sorted_pop[:elitism_count])
 
-                    def get_by_weight():
-                        idx = random.randint(0, pop_size - 1)
-                        while random.random() < weights[idx]:
-                            idx = random.randint(0, pop_size - 1)
-                        return last_pop[idx]
-
-                    return get_by_weight(), get_by_weight()
-
-                def crossover(parent1, parent2):
-                    length = len(parent1)
-                    x = random.randint(0, length // 2)
-                    y = x + length // 2
-                    g_out = []
-                    for i in range(length):
-                        if x < i <= y:
-                            g_out.append(parent2[i])
-                        else:
-                            g_out.append(parent1[i])
-                    if len(g_out) < num_items:
-                        print('Error!')
-                    return g_out
-
-                def mutate(g_in):
-                    x = random.randint(0, len(g_in) - 1)
-                    g_out = []
-                    for i in range(len(g_in)):
-                        if i == x:
-                            g_out.append(not g_in[i])
-                        else:
-                            g_out.append(g_in[i])
-                    return g_out
-
-                # fill generation with new individuals
+                # Generate rest of the population
                 while len(population) < pop_size:
-                    # select two random parents by weighted selection
-                    # note no guarantee of uniqueness - could get the same parent twice
-                    parents = select_parents(fitnesses[0])
-                    # perform crossover to generate new individual
-                    baby = crossover(parents[0], parents[1])
-                    # potentially perform mutation
-                    if random.random() < mutation_rate:
-                        baby = mutate(baby)
-                    # add to next generation
-                    population.append(baby)
+                    # Select parents using tournament selection
+                    parent1, parent2 = select_parents_tournament(last_pop, k=3)
 
-                return population
+                    # Perform crossover
+                    child = crossover_uniform(parent1, parent2)
+
+                    # Mutate the child
+                    child = mutate(child)
+
+                    # Add child to the new population
+                    population.append(child)
+
+            return population
 
         def generation_step(generation=0, pop=None):
             if generation >= num_generations:
@@ -301,19 +283,11 @@ class UI(tk.Tk):
 
             if pop is None:
                 pop = get_population()
+            fitnesses = [fitness(genome) for genome in pop]
+            best_of_gen = max(pop, key=fitness)
+            best_fitness = fitness(best_of_gen)
 
-            fitnesses = []
-            best_of_gen = None
-            min_fitness = 9999
-            for genome in pop:
-                fit = fitness(genome)
-                if fit < min_fitness:
-                    best_of_gen = genome
-                    min_fitness = fit
-                fitnesses.append(fit)
-            fitnesses.sort()
-
-            print(f'Best fitness of generation {generation}: {min_fitness}')
+            print(f'Best fitness of generation {generation}: {best_fitness}')
             print(best_of_gen)
             print()
 
@@ -323,9 +297,12 @@ class UI(tk.Tk):
             self.after(0, self.draw_sum, gene_sum(best_of_gen), self.target)
             self.after(0, self.draw_genome, best_of_gen, generation)
 
-            # Schedule the next generation step after a delay, unless we're at the global optimum (fitness == 0)
-            if fitnesses[0] != 0:
-                self.after(int(sleep_time * 1000), generation_step, generation + 1, get_population(pop, fitnesses))
+            # Schedule the next generation step after a delay, unless we have found a perfect solution
+            if best_fitness < self.target:
+                self.after(int(sleep_time * 1000), generation_step, generation + 1, get_population(pop))
+            else:
+                print(f'Solution found at generation {generation}')
+                # Optionally, display the solution
 
         # Start the evolutionary process
         generation_step()
